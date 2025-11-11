@@ -129,6 +129,16 @@
         <div class="mt-4">
             <div id="limit-message" class="hidden"></div>
             <div id="input-controls" class="flex rounded-xl overflow-hidden shadow-2xl bg-[#161b22]">
+                
+                <!-- Tlačidlo pre nahrávanie obrázkov -->
+                <label for="image-upload" class="flex items-center justify-center p-4 bg-gray-700 hover:bg-gray-600 cursor-pointer transition duration-200">
+                    <!-- Ikona pre obrázok (lucide-react: image) -->
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-green-400">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5 1.5l1.409-1.409a2.25 2.25 0 000-3.182l-5.159-5.159m0-3.182V7.5M21.75 15.75H15M17.25 8.25V2.25" />
+                    </svg>
+                </label>
+                <input type="file" id="image-upload" accept="image/*" class="hidden">
+                
                 <input type="text" id="user-input" placeholder="Napíš svoju požiadavku na kód..."
                        class="flex-grow p-4 text-gray-200 bg-transparent focus:outline-none placeholder-gray-500">
                 <button id="send-button"
@@ -136,6 +146,12 @@
                         onclick="sendMessage()">
                     Odoslať
                 </button>
+            </div>
+            <!-- Oblasť náhľadu obrázka -->
+            <div id="image-preview-container" class="mt-2 hidden p-2 border border-gray-700 rounded-lg flex items-center bg-[#161b22]">
+                <span class="text-sm text-gray-400 mr-3">Nahratý obrázok:</span>
+                <img id="image-preview" class="h-10 w-10 object-cover rounded-md mr-4" alt="Nahratý obrázok">
+                <button onclick="clearImage()" class="text-red-400 hover:text-red-500 text-sm font-semibold">Zrušiť</button>
             </div>
         </div>
     </div>
@@ -164,6 +180,13 @@
         const sendButton = document.getElementById('send-button');
         const limitMessageDiv = document.getElementById('limit-message');
 
+        // Nové referencie a stav pre obrázok
+        const imageUploadInput = document.getElementById('image-upload');
+        const imagePreview = document.getElementById('image-preview');
+        const imagePreviewContainer = document.getElementById('image-preview-container');
+        let selectedImageBase64 = null;
+        let selectedImageMimeType = null;
+
         // Funkcia na generovanie unikátneho ID
         function generateUniqueId(prefix = 'el') {
             return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -181,6 +204,10 @@
             sendButton.classList.toggle('bg-green-600', !isLimited);
             sendButton.classList.toggle('hover:bg-green-700', !isLimited);
             
+            // Zakázať upload obrázku pri limitoch
+            document.querySelector('label[for="image-upload"]').classList.toggle('opacity-50', isLimited);
+            document.querySelector('label[for="image-upload"]').classList.toggle('cursor-not-allowed', isLimited);
+
             if (isLimited) {
                 limitMessageDiv.textContent = message;
                 limitMessageDiv.classList.remove('hidden');
@@ -273,6 +300,63 @@
             }
         }
 
+        // --- Logika pre obrázky ---
+
+        // Utility funkcia na konverziu File na Base64
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    // Odstránenie prefixu "data:image/jpeg;base64,"
+                    const base64String = reader.result.split(',')[1];
+                    resolve(base64String);
+                };
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Funkcia na zrušenie vybraného obrázka
+        function clearImage() {
+            selectedImageBase64 = null;
+            selectedImageMimeType = null;
+            imageUploadInput.value = null;
+            imagePreviewContainer.classList.add('hidden');
+            checkLimits(false); 
+        }
+
+        // Handler pre výber súboru
+        imageUploadInput.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                if (!file.type.startsWith('image/')) {
+                    // Pre iFrame by sa malo použiť vlastné UI, ale tu použijeme console.log
+                    console.warn('Prosím, nahrajte súbor s obrázkom.'); 
+                    e.target.value = null; // Vyčisti input
+                    return;
+                }
+
+                try {
+                    selectedImageBase64 = await fileToBase64(file);
+                    selectedImageMimeType = file.type;
+                    
+                    // Zobraz náhľad
+                    imagePreview.src = URL.createObjectURL(file);
+                    imagePreviewContainer.classList.remove('hidden');
+                    
+                    checkLimits(false); // Aktualizuj UI/kontrolu limitov
+
+                } catch (error) {
+                    console.error("Chyba pri spracovaní obrázka:", error);
+                    clearImage();
+                }
+            } else {
+                clearImage();
+            }
+        });
+
+        // --- Inicializácia a udalosti ---
+
         // Inicializácia pri načítaní stránky
         window.onload = function() {
             checkLimits(false); // Kontrola limitov bez inkrementácie
@@ -297,30 +381,19 @@
 
         /**
          * Skopíruje text do schránky (pomocou document.execCommand('copy') pre iFrame kompatibilitu).
-         * @param {HTMLElement} codeElement - Element obsahujúci kód (<code>).
-         * @param {HTMLElement} buttonElement - Tlačidlo, ktoré treba aktualizovať.
          */
         function copyCode(codeElement, buttonElement) {
             try {
-                // Vytvorenie dočasnej textarea
                 const textArea = document.createElement('textarea');
-                // Nastavenie hodnoty na text z <code> bloku
                 textArea.value = codeElement.textContent;
-                
-                // Umiestnenie mimo obrazovky, aby nebolo viditeľné
                 textArea.style.position = 'fixed';
                 textArea.style.left = '-9999px';
                 document.body.appendChild(textArea);
-                
-                // Výber a kopírovanie
                 textArea.focus();
                 textArea.select();
-                
-                // Použitie execCommand pre najlepšiu kompatibilitu v iFrame
                 document.execCommand('copy');
                 document.body.removeChild(textArea);
 
-                // Spätná väzba pre používateľa
                 buttonElement.textContent = 'Skopírované!';
                 buttonElement.classList.add('copied');
                 
@@ -344,17 +417,26 @@
          * Vytvorí a pridá bublinu so správou do kontajnera.
          * @param {string} text - Obsah správy.
          * @param {'user'|'ai'} role - Rola odosielateľa.
+         * @param {string | null} base64Image - Base64 dátový reťazec obrázka pre preview.
          */
-        function addMessage(text, role) {
+        function addMessage(text, role, base64Image = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
 
             const bubble = document.createElement('div');
             bubble.className = `${role === 'user' ? 'user-message text-white' : 'ai-message-bubble text-gray-200 ai-message'} shadow-xl`;
             
-            // Nahradenie markdown syntaxe
+            let contentHTML = '';
+
+            // 1. Zobrazenie nahratého obrázka pri odoslaní používateľom
+            if (role === 'user' && base64Image) {
+                // Použijeme zástupný typ 'image/jpeg' pre náhľad, aby sa zobrazil
+                contentHTML += `<img src="data:image/jpeg;base64,${base64Image}" class="w-full max-h-48 object-contain rounded-lg mb-2 border border-gray-600" alt="Odoslaný obrázok"><br>`;
+            }
+
+            // 2. Spracovanie textu a kódu
             let codeBlockCounter = 0;
-            const htmlText = text
+            const textHTML = text
                 // Jednoduché spracovanie Markdown pre kódové bloky
                 .replace(/```lua\s*([\s\S]*?)```/g, (match, code) => {
                     const codeId = generateUniqueId('lua');
@@ -371,7 +453,8 @@
                 })
                 .replace(/\n/g, '<br>'); // Nahradenie nových riadkov za <br>
 
-            bubble.innerHTML = htmlText;
+            contentHTML += textHTML;
+            bubble.innerHTML = contentHTML;
 
             messageDiv.appendChild(bubble);
             messagesContainer.appendChild(messageDiv);
@@ -396,10 +479,16 @@
                     loaderDiv = document.createElement('div');
                     loaderDiv.id = 'loader-message';
                     loaderDiv.className = 'flex justify-start';
+                    
+                    let loadingText = "Generujem kód...";
+                    if (selectedImageBase64) {
+                        loadingText = "Pozeram Obrazok čakajte môže to trvať...."; // Custom image loading message
+                    }
+
                     loaderDiv.innerHTML = `
                         <div class="ai-message-bubble flex items-center space-x-2">
                             <div class="loader"></div>
-                            <span>Generujem kód...</span>
+                            <span>${loadingText}</span>
                         </div>
                     `;
                     messagesContainer.appendChild(loaderDiv);
@@ -417,19 +506,48 @@
          */
         async function sendMessage() {
             if (!checkLimits(true)) {
-                // Ak je limit prekročený, checkLimits už aktualizoval UI a vrátil false
                 return; 
             }
 
             const userText = userInput.value.trim();
-            if (!userText) return;
+            // Povolíme odoslanie, aj keď je len obrázok
+            if (!userText && !selectedImageBase64) return;
 
-            addMessage(userText, 'user');
+            // 1. Pridanie používateľovej správy do UI (vrátane obrázku pre preview)
+            // Ak nie je text, použijeme zástupný text, ktorý sa aj tak neodosiela, len zobrazuje
+            const previewText = userText || "Pozri si tento obrázok a pomôž mi s ním.";
+            addMessage(previewText, 'user', selectedImageBase64);
+            
+            // 2. Reset UI a zobrazenie loading spinnera
             userInput.value = '';
             toggleLoading(true);
 
-            // Pridanie správy používateľa do histórie
-            chatHistory.push({ role: "user", parts: [{ text: userText }] });
+            // 3. Konštrukcia obsahu pre API
+            const parts = [];
+            
+            // Pridanie obrázku (ak je k dispozícii)
+            if (selectedImageBase64 && selectedImageMimeType) {
+                parts.push({
+                    inlineData: {
+                        mimeType: selectedImageMimeType,
+                        data: selectedImageBase64
+                    }
+                });
+            }
+
+            // Pridanie textu
+            if (userText) {
+                 parts.push({ text: userText });
+            } else if (parts.length > 0) {
+                 // Ak je len obrázok, pošleme explicitnú textovú inštrukciu pre AI
+                 parts.push({ text: "Prosím, pomôž mi s týmto obrázkom a vygeneruj relevantný Roblox Lua kód alebo vysvetlenie." });
+            } else {
+                 toggleLoading(false);
+                 return;
+            }
+
+            // 4. Pridanie obsahu do histórie a príprava payloadu
+            chatHistory.push({ role: "user", parts: parts });
 
             const payload = {
                 contents: chatHistory,
@@ -438,6 +556,10 @@
                 },
             };
 
+            // 5. Reset stavu obrázku PO odoslaní API
+            clearImage(); 
+
+            // 6. Volanie API s retries
             const maxRetries = 5;
             let currentRetry = 0;
 
