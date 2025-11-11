@@ -23,7 +23,7 @@
             padding: 16px;
         }
         #messages {
-            flex-grow: 1; /* OPRAVENÉ: Zmenené z = na : */
+            flex-grow: 1; 
             overflow-y: auto;
             padding-right: 8px;
             scroll-behavior: smooth;
@@ -93,6 +93,16 @@
             background-color: #38a169;
             color: white;
         }
+        /* Štýl pre obmedzujúcu správu */
+        #limit-message {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #4a2122; /* Tmavá červená/hnedá */
+            color: #fca5a5;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -116,14 +126,17 @@
         </div>
 
         <!-- Vstupná oblasť -->
-        <div class="mt-4 flex rounded-xl overflow-hidden shadow-2xl bg-[#161b22]">
-            <input type="text" id="user-input" placeholder="Napíš svoju požiadavku na kód..."
-                   class="flex-grow p-4 text-gray-200 bg-transparent focus:outline-none placeholder-gray-500">
-            <button id="send-button"
-                    class="bg-green-600 hover:bg-green-700 transition duration-200 text-white font-bold px-6 py-4 disabled:bg-gray-500"
-                    onclick="sendMessage()">
-                Odoslať
-            </button>
+        <div class="mt-4">
+            <div id="limit-message" class="hidden"></div>
+            <div id="input-controls" class="flex rounded-xl overflow-hidden shadow-2xl bg-[#161b22]">
+                <input type="text" id="user-input" placeholder="Napíš svoju požiadavku na kód..."
+                       class="flex-grow p-4 text-gray-200 bg-transparent focus:outline-none placeholder-gray-500">
+                <button id="send-button"
+                        class="bg-green-600 hover:bg-green-700 transition duration-200 text-white font-bold px-6 py-4 disabled:bg-gray-500"
+                        onclick="sendMessage()">
+                    Odoslať
+                </button>
+            </div>
         </div>
     </div>
 
@@ -131,7 +144,16 @@
         const API_KEY = "AIzaSyDdiCiIfr2gLtsRMENBkWG1hJo6N1uij7w"; // Pre Canvas sa ponecháva prázdne
         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
 
-        // AKTUALIZOVANÁ KONŠTANTA PRE GENERÁCIU KÓDU - ZDÔRAZNENIE ROZDIELU GUI (COMMAND BAR) vs. OSTATNÉ (SOURCE)
+        // Konštanty pre limity
+        const USAGE_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hodiny
+        const COOLDOWN_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hodín
+        const MAX_REQUESTS = 50; // Maximálne 50 kódov
+
+        // Kľúče pre localStorage
+        const LS_USAGE_START = 'luaExpertUsageStart';
+        const LS_REQUEST_COUNT = 'luaExpertRequestCount';
+        const LS_COOLDOWN_END = 'luaExpertCooldownEnd';
+
         const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. Your purpose is to generate complete, functional, and efficient Lua code snippets or full scripts. **CRITICAL DISTINCTION:** 1. **For GUI requests:** Generate the code as a single, detailed **Command Bar script** that creates all Instances (ScreenGui, Frame, TextLabels, etc.) and parents them to `game:GetService(\"StarterGui\")`. Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For non-GUI requests (Server Logic, Part Manipulation, DataStore, pure Local Scripts):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for non-GUI requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
 
         // História chatu na udržanie kontextu
@@ -140,11 +162,138 @@
         const messagesContainer = document.getElementById('messages');
         const userInput = document.getElementById('user-input');
         const sendButton = document.getElementById('send-button');
+        const limitMessageDiv = document.getElementById('limit-message');
 
         // Funkcia na generovanie unikátneho ID
         function generateUniqueId(prefix = 'el') {
             return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         }
+
+        /**
+         * Zobrazí správu o limite a zablokuje vstup.
+         * @param {string} message - Správa, ktorá sa má zobraziť.
+         * @param {boolean} isLimited - True ak sa má UI zablokovať.
+         */
+        function updateUIForLimit(message, isLimited) {
+            userInput.disabled = isLimited;
+            sendButton.disabled = isLimited;
+            sendButton.classList.toggle('disabled:bg-gray-500', isLimited);
+            sendButton.classList.toggle('bg-green-600', !isLimited);
+            sendButton.classList.toggle('hover:bg-green-700', !isLimited);
+            
+            if (isLimited) {
+                limitMessageDiv.textContent = message;
+                limitMessageDiv.classList.remove('hidden');
+                userInput.placeholder = "Nemôžete písať, limit je aktívny.";
+            } else {
+                limitMessageDiv.classList.add('hidden');
+                userInput.placeholder = "Napíš svoju požiadavku na kód...";
+            }
+        }
+
+        /**
+         * Formátuje milisekundy na H:M:S reťazec.
+         * @param {number} ms - Čas v milisekundách.
+         * @returns {string} Formátovaný čas.
+         */
+        function formatTime(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            return `${hours}h ${minutes}m ${seconds}s`;
+        }
+
+
+        /**
+         * Kontroluje limity použitia.
+         * @param {boolean} increment - True, ak sa má inkrementovať počet requestov.
+         * @returns {boolean} True, ak je povolené odoslať správu.
+         */
+        function checkLimits(increment = true) {
+            const now = Date.now();
+            let usageStartTime = parseInt(localStorage.getItem(LS_USAGE_START) || '0');
+            let requestCount = parseInt(localStorage.getItem(LS_REQUEST_COUNT) || '0');
+            let cooldownEndTime = parseInt(localStorage.getItem(LS_COOLDOWN_END) || '0');
+            let isLimited = false;
+            let message = '';
+            
+            // 1. Skontroluj, či je aktívny ochladzovací čas
+            if (cooldownEndTime > now) {
+                const remainingTime = cooldownEndTime - now;
+                message = `Dosiahol/a si denný limit. Čas do resetu: ${formatTime(remainingTime)}.`;
+                isLimited = true;
+            } 
+            
+            // 2. Ak nie je limit, skontroluj okno a počet
+            if (!isLimited) {
+                // A) Inicializácia alebo reset okna
+                if (usageStartTime === 0 || usageStartTime + USAGE_WINDOW_MS < now) {
+                    // Reset okna
+                    usageStartTime = now;
+                    requestCount = 0;
+                    localStorage.setItem(LS_USAGE_START, usageStartTime);
+                    localStorage.setItem(LS_REQUEST_COUNT, requestCount);
+                    // Odstráň starý cooldown (ak nebol odstránený)
+                    localStorage.removeItem(LS_COOLDOWN_END);
+                }
+
+                // B) Skontroluj limit 50 kódov
+                if (requestCount >= MAX_REQUESTS) {
+                    cooldownEndTime = now + COOLDOWN_DURATION_MS;
+                    localStorage.setItem(LS_COOLDOWN_END, cooldownEndTime);
+                    const remainingTime = cooldownEndTime - now;
+                    message = `Dosiahol/a si limit ${MAX_REQUESTS} kódov za 4 hodiny. Reset za: ${formatTime(remainingTime)}.`;
+                    isLimited = true;
+                } 
+            }
+
+            if (isLimited) {
+                updateUIForLimit(message, true);
+                return false;
+            } else {
+                // Limity OK, zobrazenie aktuálneho stavu (nie je limit, ale je to informačná správa)
+                const requestsLeft = MAX_REQUESTS - requestCount;
+                const windowEnd = usageStartTime + USAGE_WINDOW_MS;
+                const windowTimeLeft = windowEnd - now;
+
+                message = `Stav: Zostáva ${requestsLeft} kódov. Čas do resetu okna: ${formatTime(windowTimeLeft)}.`;
+                updateUIForLimit(message, false);
+
+                // 3. Ak je povolené, inkrementuj
+                if (increment) {
+                    requestCount++;
+                    localStorage.setItem(LS_REQUEST_COUNT, requestCount);
+                    // Po inkrementácii opäť skontroluj, či nebol limit práve dosiahnutý
+                    if (requestCount >= MAX_REQUESTS) {
+                        return checkLimits(false); // Rekurzívna kontrola bez ďalšej inkrementácie
+                    }
+                }
+                return true;
+            }
+        }
+
+        // Inicializácia pri načítaní stránky
+        window.onload = function() {
+            checkLimits(false); // Kontrola limitov bez inkrementácie
+            // Nastav interval na aktualizáciu správy o limite (každú sekundu)
+            setInterval(() => {
+                const cooldownEnd = parseInt(localStorage.getItem(LS_COOLDOWN_END) || '0');
+                if (cooldownEnd > Date.now()) {
+                    checkLimits(false); // Aktualizuje časovač
+                } else if (cooldownEnd > 0) {
+                    // Cooldown skončil
+                    checkLimits(false); // Vynúti reset okna
+                }
+            }, 1000);
+        };
+
+        // Pridanie udalosti na odoslanie stlačením Enter
+        userInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
 
         /**
          * Skopíruje text do schránky (pomocou document.execCommand('copy') pre iFrame kompatibilitu).
@@ -191,13 +340,6 @@
             }
         }
 
-        // Pridanie udalosti na odoslanie stlačením Enter
-        userInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-
         /**
          * Vytvorí a pridá bublinu so správou do kontajnera.
          * @param {string} text - Obsah správy.
@@ -241,6 +383,9 @@
          * @param {boolean} show - True pre zobrazenie, False pre skrytie.
          */
         function toggleLoading(show) {
+            // Tlačidlo už je riadené cez checkLimits, ale túto logiku ponecháme pre loader
+            if (!show && sendButton.disabled) return; 
+
             sendButton.disabled = show;
             userInput.disabled = show;
             
@@ -271,6 +416,11 @@
          * Odosiela správu do Gemini API a spracuje odpoveď.
          */
         async function sendMessage() {
+            if (!checkLimits(true)) {
+                // Ak je limit prekročený, checkLimits už aktualizoval UI a vrátil false
+                return; 
+            }
+
             const userText = userInput.value.trim();
             if (!userText) return;
 
@@ -333,6 +483,7 @@
                 }
             }
             toggleLoading(false);
+            checkLimits(false); // Po dokončení volania API opäť skontroluj limity pre aktuálnu vizualizáciu
         }
     </script>
 </body>
