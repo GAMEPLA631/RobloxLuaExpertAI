@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roblox Lua Expert Chat</title>
+    <!-- Načítanie Tailwind CSS pre moderný a responzívny dizajn -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #c9d1d9;
+        }
+        /* Štýlovanie pre chatovú oblasť */
+        #chat-container {
+            max-width: 900px;
+            height: 100vh;
+            margin: auto;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+        }
+        #messages {
+            flex-grow: 1; /* OPRAVENÉ: Zmenené z = na : */
+            overflow-y: auto;
+            padding-right: 8px;
+            scroll-behavior: smooth;
+        }
+        /* Štýl pre AI kódový blok */
+        .ai-message pre {
+            background-color: #161b22 !important;
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            border-left: 4px solid #38a169; /* Zelený pruh pre Lua kód */
+            margin-top: 0.5rem;
+            white-space: pre-wrap; /* Aby sa dlhé riadky zalomili */
+            word-wrap: break-word;
+        }
+        .ai-message code {
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #58a6ff;
+            font-size: 0.875rem;
+        }
+        .user-message {
+            background-color: #21262d;
+            border-radius: 12px 12px 2px 12px;
+            padding: 10px 15px;
+            max-width: 80%;
+        }
+        .ai-message-bubble {
+            background-color: #161b22;
+            border-radius: 12px 12px 12px 2px;
+            padding: 10px 15px;
+            max-width: 80%;
+        }
+        .loader {
+            border: 4px solid #21262d;
+            border-top: 4px solid #38a169;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Pridanie štýlu pre wrapper kódu a tlačidlo Kopírovať */
+        .code-block-wrapper {
+            position: relative;
+        }
+        .copy-button {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background-color: #21262d;
+            color: #c9d1d9;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            border: 1px solid #30363d;
+            transition: background-color 0.2s;
+            z-index: 10;
+        }
+        .copy-button:hover {
+            background-color: #30363d;
+        }
+        .copy-button.copied {
+            background-color: #38a169;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="chat-container">
+        <!-- Hlavička -->
+        <header class="text-center pb-4 border-b border-gray-700 mb-4">
+            <h1 class="text-3xl font-bold text-green-400">Roblox Lua Expert AI</h1>
+            <p class="text-gray-400">Generovanie funkčných Roblox Lua kódov pre tvoje projekty (vrátane GUI)</p>
+        </header>
+
+        <!-- Oblasť správ -->
+        <div id="messages" class="space-y-4">
+            <!-- Úvodná správa od AI -->
+            <div class="flex justify-start">
+                <div class="ai-message-bubble shadow-xl">
+                    <p>Ahoj! Som tvoj Roblox Lua Expert AI. Povedz mi, aký skript by si chcel/a vytvoriť. Či už potrebuješ serverový kód, klientske GUI (StarterGUI) alebo pokročilé funkcie, som tu pre teba!</p>
+                </div>
+            </div>
+            <!-- Správy budú pridané sem -->
+        </div>
+
+        <!-- Vstupná oblasť -->
+        <div class="mt-4 flex rounded-xl overflow-hidden shadow-2xl bg-[#161b22]">
+            <input type="text" id="user-input" placeholder="Napíš svoju požiadavku na kód..."
+                   class="flex-grow p-4 text-gray-200 bg-transparent focus:outline-none placeholder-gray-500">
+            <button id="send-button"
+                    class="bg-green-600 hover:bg-green-700 transition duration-200 text-white font-bold px-6 py-4 disabled:bg-gray-500"
+                    onclick="sendMessage()">
+                Odoslať
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = "AIzaSyDdiCiIfr2gLtsRMENBkWG1hJo6N1uij7w"; // Pre Canvas sa ponecháva prázdne
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+
+        // AKTUALIZOVANÁ KONŠTANTA PRE GENERÁCIU KÓDU - ZDÔRAZNENIE ROZDIELU GUI (COMMAND BAR) vs. OSTATNÉ (SOURCE)
+        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. Your purpose is to generate complete, functional, and efficient Lua code snippets or full scripts. **CRITICAL DISTINCTION:** 1. **For GUI requests:** Generate the code as a single, detailed **Command Bar script** that creates all Instances (ScreenGui, Frame, TextLabels, etc.) and parents them to `game:GetService(\"StarterGui\")`. Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For non-GUI requests (Server Logic, Part Manipulation, DataStore, pure Local Scripts):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for non-GUI requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
+
+        // História chatu na udržanie kontextu
+        let chatHistory = [];
+
+        const messagesContainer = document.getElementById('messages');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+
+        // Funkcia na generovanie unikátneho ID
+        function generateUniqueId(prefix = 'el') {
+            return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        }
+
+        /**
+         * Skopíruje text do schránky (pomocou document.execCommand('copy') pre iFrame kompatibilitu).
+         * @param {HTMLElement} codeElement - Element obsahujúci kód (<code>).
+         * @param {HTMLElement} buttonElement - Tlačidlo, ktoré treba aktualizovať.
+         */
+        function copyCode(codeElement, buttonElement) {
+            try {
+                // Vytvorenie dočasnej textarea
+                const textArea = document.createElement('textarea');
+                // Nastavenie hodnoty na text z <code> bloku
+                textArea.value = codeElement.textContent;
+                
+                // Umiestnenie mimo obrazovky, aby nebolo viditeľné
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-9999px';
+                document.body.appendChild(textArea);
+                
+                // Výber a kopírovanie
+                textArea.focus();
+                textArea.select();
+                
+                // Použitie execCommand pre najlepšiu kompatibilitu v iFrame
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+
+                // Spätná väzba pre používateľa
+                buttonElement.textContent = 'Skopírované!';
+                buttonElement.classList.add('copied');
+                
+                setTimeout(() => {
+                    buttonElement.textContent = 'Kopírovať';
+                    buttonElement.classList.remove('copied');
+                }, 2000);
+
+            } catch (err) {
+                console.error('Nepodarilo sa skopírovať kód:', err);
+                buttonElement.textContent = 'Chyba!';
+                buttonElement.classList.add('bg-red-600');
+                setTimeout(() => {
+                    buttonElement.textContent = 'Kopírovať';
+                    buttonElement.classList.remove('bg-red-600');
+                }, 2000);
+            }
+        }
+
+        // Pridanie udalosti na odoslanie stlačením Enter
+        userInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        /**
+         * Vytvorí a pridá bublinu so správou do kontajnera.
+         * @param {string} text - Obsah správy.
+         * @param {'user'|'ai'} role - Rola odosielateľa.
+         */
+        function addMessage(text, role) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = `${role === 'user' ? 'user-message text-white' : 'ai-message-bubble text-gray-200 ai-message'} shadow-xl`;
+            
+            // Nahradenie markdown syntaxe
+            let codeBlockCounter = 0;
+            const htmlText = text
+                // Jednoduché spracovanie Markdown pre kódové bloky
+                .replace(/```lua\s*([\s\S]*?)```/g, (match, code) => {
+                    const codeId = generateUniqueId('lua');
+                    codeBlockCounter++;
+                    // Pre-escape the code content for display (inside <code>)
+                    const escapedCode = code.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    // Tvorba HTML s tlačidlom na kopírovanie, ktoré volá copyCode s unikátnym ID
+                    return `
+                    <div class="code-block-wrapper">
+                        <button class="copy-button" onclick="copyCode(document.getElementById('${codeId}'), this)">Kopírovať</button>
+                        <pre><code id="${codeId}">${escapedCode}</code></pre>
+                    </div>
+                    `;
+                })
+                .replace(/\n/g, '<br>'); // Nahradenie nových riadkov za <br>
+
+            bubble.innerHTML = htmlText;
+
+            messageDiv.appendChild(bubble);
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        /**
+         * Zobrazí alebo skryje animáciu načítania.
+         * @param {boolean} show - True pre zobrazenie, False pre skrytie.
+         */
+        function toggleLoading(show) {
+            sendButton.disabled = show;
+            userInput.disabled = show;
+            
+            let loaderDiv = document.getElementById('loader-message');
+            
+            if (show) {
+                if (!loaderDiv) {
+                    loaderDiv = document.createElement('div');
+                    loaderDiv.id = 'loader-message';
+                    loaderDiv.className = 'flex justify-start';
+                    loaderDiv.innerHTML = `
+                        <div class="ai-message-bubble flex items-center space-x-2">
+                            <div class="loader"></div>
+                            <span>Generujem kód...</span>
+                        </div>
+                    `;
+                    messagesContainer.appendChild(loaderDiv);
+                }
+            } else {
+                if (loaderDiv) {
+                    loaderDiv.remove();
+                }
+            }
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        /**
+         * Odosiela správu do Gemini API a spracuje odpoveď.
+         */
+        async function sendMessage() {
+            const userText = userInput.value.trim();
+            if (!userText) return;
+
+            addMessage(userText, 'user');
+            userInput.value = '';
+            toggleLoading(true);
+
+            // Pridanie správy používateľa do histórie
+            chatHistory.push({ role: "user", parts: [{ text: userText }] });
+
+            const payload = {
+                contents: chatHistory,
+                systemInstruction: {
+                    parts: [{ text: SYSTEM_INSTRUCTION_TEXT }]
+                },
+            };
+
+            const maxRetries = 5;
+            let currentRetry = 0;
+
+            while (currentRetry < maxRetries) {
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429) {
+                            throw new Error('Rate limit exceeded (429)');
+                        }
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    
+                    const candidate = result.candidates?.[0];
+                    const aiText = candidate?.content?.parts?.[0]?.text;
+
+                    if (aiText) {
+                        addMessage(aiText, 'ai');
+                        // Pridanie odpovede AI do histórie
+                        chatHistory.push({ role: "model", parts: [{ text: aiText }] });
+                    } else {
+                        addMessage("Prepáč, nepodarilo sa mi vygenerovať odpoveď. Skús to prosím znova.", 'ai');
+                    }
+                    break; // Úspech, ukončenie cyklu
+                } catch (error) {
+                    console.error('Chyba pri volaní API:', error);
+                    if (error.message.includes('429') && currentRetry < maxRetries - 1) {
+                        const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        currentRetry++;
+                        console.log(`Opakujem pokus za ${delay / 1000}s...`);
+                    } else {
+                        addMessage(`Prepáč, nastala chyba pri komunikácii s AI: ${error.message}.`, 'ai');
+                        break; // Chyba, ktorú nevieme opakovať, ukončenie cyklu
+                    }
+                }
+            }
+            toggleLoading(false);
+        }
+    </script>
+</body>
+</html>
