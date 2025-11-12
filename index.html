@@ -157,7 +157,7 @@
     </div>
 
     <script>
-        const API_KEY = "AIzaSyDdiCiIfr2gLtsRMENBkWG1hJo6N1uij7w"; // Pre Canvas sa ponecháva prázdne
+        const API_KEY = "AIzaSyBIzvYGiWGoFUxmxdz2qEYMpNdCnUN8DjE"; // Pre Canvas sa ponecháva prázdne
         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
 
         // Konštanty pre limity
@@ -170,7 +170,8 @@
         const LS_REQUEST_COUNT = 'luaExpertRequestCount';
         const LS_COOLDOWN_END = 'luaExpertCooldownEnd';
 
-        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. Your purpose is to generate complete, functional, and efficient Lua code snippets or full scripts. **CRITICAL DISTINCTION:** 1. **For GUI requests:** Generate the code as a single, detailed **Command Bar script** that creates all Instances (ScreenGui, Frame, TextLabels, etc.) and parents them to `game:GetService(\"StarterGui\")`. Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For non-GUI requests (Server Logic, Part Manipulation, DataStore, pure Local Scripts):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for non-GUI requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
+        // Aktualizovaný SYSTEM INSTRUCTION s dôrazom na hlboké chápanie a funkčnosť
+        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. You possess deep understanding of Roblox systems, client-server architecture, and the user's intent, even when feedback is critical (e.g., 'zlý kód' or 'nefunguje'). Your purpose is to generate complete, functional, professional, and highly efficient Lua code snippets or full scripts. If the user indicates an error or dissatisfaction, you must thoroughly re-analyze the entire conversation history and the image (if provided) to provide a corrected, flawless solution. **CRITICAL DISTINCTION:** 1. **For GUI requests:** Generate the code as a single, detailed **Command Bar script** that creates all Instances (ScreenGui, Frame, TextLabels, etc.) and parents them to `game:GetService(\"StarterGui\")`. Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For non-GUI requests (Server Logic, Part Manipulation, DataStore, pure Local Scripts):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for non-GUI requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
 
         // História chatu na udržanie kontextu
         let chatHistory = [];
@@ -330,7 +331,6 @@
             const file = e.target.files[0];
             if (file) {
                 if (!file.type.startsWith('image/')) {
-                    // Pre iFrame by sa malo použiť vlastné UI, ale tu použijeme console.log
                     console.warn('Prosím, nahrajte súbor s obrázkom.'); 
                     e.target.value = null; // Vyčisti input
                     return;
@@ -462,6 +462,24 @@
         }
 
         /**
+         * Zistí, či história obsahuje negatívnu spätnú väzbu.
+         */
+        function hasNegativeFeedback() {
+            // Kontrola posledných 4 správ (kde by bola spätná väzba relevantná)
+            const recentHistory = chatHistory.slice(-4);
+            const negativeKeywords = ["zlý kód", "zly kod", "nefunguje", "chyba", "oprav", "zle si mi dal"];
+
+            // Hľadá, či posledné správy používateľa obsahujú negatívne kľúčové slovo
+            return recentHistory.some(message => {
+                if (message.role === "user") {
+                    const text = message.parts[0]?.text || "";
+                    return negativeKeywords.some(keyword => text.toLowerCase().includes(keyword));
+                }
+                return false;
+            });
+        }
+
+        /**
          * Zobrazí alebo skryje animáciu načítania.
          * @param {boolean} show - True pre zobrazenie, False pre skrytie.
          */
@@ -481,8 +499,11 @@
                     loaderDiv.className = 'flex justify-start';
                     
                     let loadingText = "Generujem kód...";
+
                     if (selectedImageBase64) {
-                        loadingText = "Pozeram Obrazok čakajte môže to trvať...."; // Custom image loading message
+                        loadingText = "Pozeram Obrazok čakajte môže to trvať...."; // Správa pre obrázok
+                    } else if (hasNegativeFeedback()) {
+                        loadingText = "Premýšľam... Analyzujem chybu a generujem vylepšený kód. Čakajte prosím."; // Správa pre opravu
                     }
 
                     loaderDiv.innerHTML = `
@@ -514,7 +535,6 @@
             if (!userText && !selectedImageBase64) return;
 
             // 1. Pridanie používateľovej správy do UI (vrátane obrázku pre preview)
-            // Ak nie je text, použijeme zástupný text, ktorý sa aj tak neodosiela, len zobrazuje
             const previewText = userText || "Pozri si tento obrázok a pomôž mi s ním.";
             addMessage(previewText, 'user', selectedImageBase64);
             
@@ -610,3 +630,4 @@
     </script>
 </body>
 </html>
+
