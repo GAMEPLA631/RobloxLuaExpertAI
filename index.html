@@ -111,7 +111,7 @@
         <!-- Hlavička -->
         <header class="text-center pb-4 border-b border-gray-700 mb-4">
             <h1 class="text-3xl font-bold text-green-400">Roblox Lua Expert AI</h1>
-            <p class="text-gray-400">Generovanie funkčných Roblox Lua kódov pre tvoje projekty (vrátane GUI)</p>
+            <p class="text-gray-400">Generovanie funkčných Roblox Lua kódov pre tvoje projekty (vrátane GUI a 3D modelov)</p>
         </header>
 
         <!-- Oblasť správ -->
@@ -119,7 +119,7 @@
             <!-- Úvodná správa od AI -->
             <div class="flex justify-start">
                 <div class="ai-message-bubble shadow-xl">
-                    <p>Ahoj! Som tvoj Roblox Lua Expert AI. Povedz mi, aký skript by si chcel/a vytvoriť. Či už potrebuješ serverový kód, klientske GUI (StarterGUI) alebo pokročilé funkcie, som tu pre teba!</p>
+                    <p>Ahoj! Som tvoj Roblox Lua Expert AI. Povedz mi, aký skript by si chcel/a vytvoriť. Či už potrebuješ serverový kód, klientske GUI (StarterGUI), pokročilé 3D modely alebo NPC, som tu pre teba!</p>
                 </div>
             </div>
             <!-- Správy budú pridané sem -->
@@ -170,8 +170,8 @@
         const LS_REQUEST_COUNT = 'luaExpertRequestCount';
         const LS_COOLDOWN_END = 'luaExpertCooldownEnd';
 
-        // Aktualizovaný SYSTEM INSTRUCTION s dôrazom na hlboké chápanie, funkčnosť a bizarné požiadavky
-        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. You possess deep, flawless understanding of Roblox systems, client-server architecture, and the user's intent, striving for 100% functional, bug-free, and professionally structured code, even for unusual or 'bizarné' requests (e.g., 'bizarný backrooms', 'zvláštne GUI'). Your purpose is to generate complete, functional, professional, and highly efficient Lua code snippets or full scripts. If the user indicates an error or dissatisfaction, you must thoroughly re-analyze the entire conversation history and the image (if provided) to provide a corrected, flawless solution. **CRITICAL DISTINCTION:** 1. **For GUI requests:** Generate the code as a single, detailed **Command Bar script** that creates all Instances (ScreenGui, Frame, TextLabels, etc.) and parents them to `game:GetService(\"StarterGui\")`. Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For non-GUI requests (Server Logic, Part Manipulation, DataStore, pure Local Scripts):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for non-GUI requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
+        // Aktualizovaný SYSTEM INSTRUCTION s dôrazom na hlboké chápanie, funkčnosť a 3D modely
+        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. You possess deep, flawless understanding of Roblox systems, client-server architecture, and the user's intent, striving for 100% functional, bug-free, and professionally structured code, even for unusual or 'bizarné' requests (e.g., 'bizarný backrooms', 'zvláštne GUI', '3D modely'). Your expertise includes advanced GUI (StarterGui), complex 3D model generation (Parts, environmental objects, terrain features), and functional NPC systems (including pathfinding or simple logic). Your purpose is to generate complete, functional, professional, and highly efficient Lua code snippets or full scripts. If the user indicates an error or dissatisfaction, you must thoroughly re-analyze the entire conversation history and the image (if provided) to provide a corrected, flawless solution. **CRITICAL DISTINCTION:** 1. **For ALL instance creation requests (GUI, 3D Models, NPCs, Parts, Environment):** Generate the code as a single, detailed **Command Bar script** that creates all Instances and parents them correctly (e.g., to `game:GetService(\"StarterGui\")` or `game:GetService(\"Workspace\")`). Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For logic-only requests (DataStore, RemoteEvents/Functions, pure math, utilities):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for logic-only requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
 
         // História chatu na udržanie kontextu
         let chatHistory = [];
@@ -480,14 +480,15 @@
         }
 
         /**
-         * Zistí, či požiadavka naznačuje GUI alebo Command Bar.
+         * Zistí, či požiadavka naznačuje GUI, 3D model, NPC alebo iné Command Bar inštancie.
          * @param {string} userText - Text používateľa.
-         * @returns {boolean} True, ak ide o GUI/Command Bar.
+         * @returns {boolean} True, ak ide o Command Bar inštanciu.
          */
         function isGuiOrCommandBarRequest(userText) {
-            const guiKeywords = ["gui", "startergui", "command bar", "skript do command bar", "screen", "button", "frame", "textlabel"];
+            // Rozšírené kľúčové slová pre GUI a 3D objekty/NPC
+            const creationKeywords = ["gui", "startergui", "command bar", "screen", "button", "frame", "textlabel", "model", "npc", "3d", "part", "objekt", "backrooms", "terrain", "vytvor", "vygeneruj", "instance", "objekt", "postava", "svet"];
             const text = userText.toLowerCase();
-            return guiKeywords.some(keyword => text.includes(keyword));
+            return creationKeywords.some(keyword => text.includes(keyword));
         }
 
         /**
@@ -496,7 +497,7 @@
          * @returns {boolean} True, ak je požiadavka bizarná.
          */
         function isBizarreRequest(userText) {
-            const bizarreKeywords = ["bizarny", "bizarný", "zvláštny", "divný", "ufo", "meme", "backrooms", "scp"];
+            const bizarreKeywords = ["bizarny", "bizarný", "zvláštny", "divný", "ufo", "meme", "backrooms", "scp", "random", "šialený", "nepravdepodobný"];
             const text = userText.toLowerCase();
             return bizarreKeywords.some(keyword => text.includes(keyword));
         }
@@ -522,14 +523,14 @@
                     loaderDiv.id = 'loader-message';
                     loaderDiv.className = 'flex justify-start';
                     
-                    let loadingText = "Generujem kód...";
+                    let loadingText = "Generujem kód..."; // Default
 
                     if (selectedImageBase64) {
                         loadingText = "Pozeram Obrazok čakajte môže to trvať...."; // Správa pre obrázok
                     } else if (hasNegativeFeedback()) {
                         loadingText = "Premýšľam... Analyzujem chybu a generujem vylepšený kód. Čakajte prosím."; // Správa pre opravu
                     } else if (isGuiOrCommandBarRequest(userText)) {
-                        // Špeciálna správa pre Command Bar a bizarné témy
+                        // Správa pre Command Bar (GUI, Model, NPC, atď.)
                         if (isBizarreRequest(userText)) {
                             loadingText = "Generujem Bizarný kód do Command bar...";
                         } else {
