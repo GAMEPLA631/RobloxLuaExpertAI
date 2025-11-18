@@ -158,7 +158,8 @@
 
     <script>
         const API_KEY = "AIzaSyD3mxzbdINvR0WMBXqBhQpp5kkihcXtRTY"; // Pre Canvas sa ponecháva prázdne
-        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+        // ZMENENÉ: gemini-2.5-flash-preview-09-2025 -> gemini-2.5-flash
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
 
         // Konštanty pre limity
         const USAGE_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hodiny
@@ -626,9 +627,18 @@
                     });
 
                     if (!response.ok) {
+                        // Read response body before throwing to check for details
+                        const errorBody = await response.json().catch(() => ({ message: 'Could not parse error body.' }));
+                        
                         if (response.status === 429) {
                             throw new Error('Rate limit exceeded (429)');
+                        } else if (response.status === 400) {
+                             // --- FIX for 400 Bad Request: Clear history and force restart ---
+                            console.error("400 Error Response Body:", errorBody);
+                            chatHistory = []; // Force a clean slate for the next message
+                            throw new Error(`Invalid request (400). Konverzácia bola vyresetovaná. Skúste to prosím znova s novou požiadavkou.`);
                         }
+                        
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
 
@@ -647,13 +657,19 @@
                     break; // Úspech, ukončenie cyklu
                 } catch (error) {
                     console.error('Chyba pri volaní API:', error);
-                    if (error.message.includes('429') && currentRetry < maxRetries - 1) {
+                    let errorMessage = error.message;
+
+                    if (errorMessage.includes('429') && currentRetry < maxRetries - 1) {
                         const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
                         await new Promise(resolve => setTimeout(resolve, delay));
                         currentRetry++;
                         console.log(`Opakujem pokus za ${delay / 1000}s...`);
+                    } else if (errorMessage.includes('Invalid request (400)')) {
+                        // Zobrazí špeciálnu správu, ak bola história vyresetovaná
+                        addMessage("Prepáč, nastala chyba 400. **Kontext bol vyresetovaný.** Prosím, pošli svoju požiadavku opäť.", 'ai');
+                        break;
                     } else {
-                        addMessage(`Prepáč, nastala chyba pri komunikácii s AI: ${error.message}.`, 'ai');
+                        addMessage(`Prepáč, nastala chyba pri komunikácii s AI: ${errorMessage}.`, 'ai');
                         break; // Chyba, ktorú nevieme opakovať, ukončenie cyklu
                     }
                 }
@@ -664,4 +680,5 @@
     </script>
 </body>
 </html>
+
 
