@@ -172,7 +172,7 @@
         const LS_COOLDOWN_END = 'luaExpertCooldownEnd';
 
         // Aktualizovaný SYSTEM INSTRUCTION s dôrazom na hlboké chápanie, funkčnosť a 3D modely
-        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. You possess deep, flawless understanding of Roblox systems, client-server architecture, and the user's intent, striving for 100% functional, bug-free, and professionally structured code, even for unusual or 'bizarné' requests (e.g., 'bizarný backrooms', 'zvláštne GUI', '3D modely'). Your expertise includes advanced GUI (StarterGui), complex 3D model generation (Parts, environmental objects, terrain features), and **robust, complete NPC systems (MANDATORY: must include a functional Humanoid, all required body parts, and correct rigging/welds - NEVER generate an empty Model or filter placeholder)**. Your purpose is to generate complete, functional, professional, and highly efficient Lua code snippets or full scripts. **CRITICAL MANDATE for ALL SCRIPTS:** If the generated code is a logic-only script (e.g., functions, datastore), it **MUST** start by defining all necessary services (`local Players = game:GetService(\"Players\")`) and required variables/instances within the code block itself, ensuring it is immediately runnable and self-contained. If the user indicates an error or dissatisfaction, you must thoroughly re-analyze the entire conversation history and the image (if provided) to provide a corrected, flawless solution. **CRITICAL DISTINCTION:** 1. **For ALL instance creation requests (GUI, 3D Models, NPCs, Parts, Environment):** Generate the code as a single, detailed **Command Bar script** that creates all Instances and parents them correctly (e.g., to `game:GetService(\"StarterGui\")` or `game:GetService(\"Workspace\")`). Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For logic-only requests (DataStore, RemoteEvents/Functions, pure math, utilities):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for logic-only requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
+        const SYSTEM_INSTRUCTION_TEXT = "You are 'Roblox Lua Expert AI', a world-class, extremely advanced programmer specialized in Roblox Lua scripting. You possess deep, flawless understanding of Roblox systems, client-server architecture, and the user's intent, striving for 100% functional, bug-free, and professionally structured code, even for unusual or 'bizarné' requests (e.g., 'bizarný backrooms', 'zvláštne GUI', '3D modely'). Your expertise includes advanced GUI (StarterGui), complex 3D model generation (Parts, environmental objects, terrain features), and **robust, complete NPC systems (MANDATORY: must include a functional Humanoid, all required body parts, and correct rigging/welds - NEVER generate an empty Model or filter placeholder)**. Your purpose is to generate complete, functional, professional, and highly efficient Lua code snippets or full scripts. **CRITICAL MANDATE for ALL SCRIPTS:** If the generated code is a logic-only script(e.g., functions, datastore), it **MUST** start by defining all necessary services (`local Players = game:GetService(\"Players\")`) and required variables/instances within the code block itself, ensuring it is immediately runnable and self-contained. If the user indicates an error or dissatisfaction, you must thoroughly re-analyze the entire conversation history and the image (if provided) to provide a corrected, flawless solution. **CRITICAL DISTINCTION:** 1. **For ALL instance creation requests (GUI, 3D Models, NPCs, Parts, Environment):** Generate the code as a single, detailed **Command Bar script** that creates all Instances and parents them correctly (e.g., to `game:GetService(\"StarterGui\")` or `game:GetService(\"Workspace\")`). Include any necessary LocalScript source inline within this command script using double square brackets (`[[...]]`). 2. **For logic-only requests (DataStore, RemoteEvents/Functions, pure math, utilities):** Generate only the Lua code that would be placed as the `Source` content of a standard Script or LocalScript. Do NOT include instance creation or parenting in the code block for logic-only requests. Always prioritize best practices, security, and performance. When providing code, always enclose it in a Markdown Lua code block (```lua...```). If the request involves client-side GUI or interaction, explicitly mention if the script should be a `LocalScript` and where it should be placed. Do not generate explanations longer than two sentences before or after the code block unless explicitly asked. The user is writing in Slovak, respond conversationally in Slovak, but keep all generated Lua code and comments within the code block in English, which is the standard for programming.";
 
         // História chatu na udržanie kontextu
         let chatHistory = [];
@@ -637,9 +637,12 @@
                             console.error("400 Error Response Body:", errorBody);
                             chatHistory = []; // Force a clean slate for the next message
                             throw new Error(`Invalid request (400). Konverzácia bola vyresetovaná. Skúste to prosím znova s novou požiadavkou.`);
+                        } else if (response.status >= 500 && response.status < 600) {
+                            // NEW: Handle 5xx errors (like 503) as temporary server issues and retry.
+                            throw new Error(`Server error! status: ${response.status}`);
                         }
                         
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        throw new Error(`Client error! status: ${response.status}`);
                     }
 
                     const result = await response.json();
@@ -659,18 +662,30 @@
                     console.error('Chyba pri volaní API:', error);
                     let errorMessage = error.message;
 
-                    if (errorMessage.includes('429') && currentRetry < maxRetries - 1) {
+                    // 1. Retry logic for 429 (Rate Limit) AND 5xx (Server Error/Temporary Issue)
+                    if ((errorMessage.includes('429') || errorMessage.includes('Server error!')) && currentRetry < maxRetries - 1) {
                         const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
                         await new Promise(resolve => setTimeout(resolve, delay));
                         currentRetry++;
                         console.log(`Opakujem pokus za ${delay / 1000}s...`);
-                    } else if (errorMessage.includes('Invalid request (400)')) {
+                    } 
+                    // 2. Handling 400 (History clear)
+                    else if (errorMessage.includes('Invalid request (400)')) {
                         // Zobrazí špeciálnu správu, ak bola história vyresetovaná
                         addMessage("Prepáč, nastala chyba 400. **Kontext bol vyresetovaný.** Prosím, pošli svoju požiadavku opäť.", 'ai');
                         break;
-                    } else {
-                        addMessage(`Prepáč, nastala chyba pri komunikácii s AI: ${errorMessage}.`, 'ai');
-                        break; // Chyba, ktorú nevieme opakovať, ukončenie cyklu
+                    } 
+                    // 3. Handling final, non-retriable, or exhausted error
+                    else {
+                        // Kontrola, či ide o chybu servera (napr. 503) alebo chybu pri opakovaní
+                        if (errorMessage.includes('Server error!') || errorMessage.includes('HTTP error! status: 503')) {
+                            // Priateľská správa pre chybu servera (503)
+                            addMessage(`Prepáč, neviem sa pripojiť k expertovi. Skús to prosím o chvíľu neskôr.`, 'ai');
+                        } else {
+                            // Ostatné chyby, kde je vhodné zobraziť detail (napr. 401, 403)
+                            addMessage(`Prepáč, nastala chyba pri komunikácii s AI: ${errorMessage}.`, 'ai');
+                        }
+                        break; // Chyba, ukončenie cyklu
                     }
                 }
             }
