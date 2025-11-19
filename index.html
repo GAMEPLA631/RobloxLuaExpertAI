@@ -103,6 +103,14 @@
             text-align: center;
             font-weight: 600;
         }
+
+        /* Nový štýl pre vizuálnu spätnú väzbu pri chybe */
+        #input-controls.error-flash {
+            border: 2px solid #ef4444; /* červený okraj */
+            background-color: #451a1a; /* tmavý červený podklad */
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+            transition: all 0.2s;
+        }
     </style>
 </head>
 <body>
@@ -181,6 +189,7 @@
         const userInput = document.getElementById('user-input');
         const sendButton = document.getElementById('send-button');
         const limitMessageDiv = document.getElementById('limit-message');
+        const inputControlsDiv = document.getElementById('input-controls'); // Referencia na kontajner vstupov
 
         // Nové referencie a stav pre obrázok
         const imageUploadInput = document.getElementById('image-upload');
@@ -419,6 +428,7 @@
          * @param {string} text - Obsah správy.
          * @param {'user'|'ai'} role - Rola odosielateľa.
          * @param {string | null} base64Image - Base64 dátový reťazec obrázka pre preview.
+         * @returns {HTMLElement} Vytvorený message element.
          */
         function addMessage(text, role, base64Image = null) {
             const messageDiv = document.createElement('div');
@@ -460,6 +470,7 @@
             messageDiv.appendChild(bubble);
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            return messageDiv;
         }
 
         /**
@@ -570,7 +581,7 @@
 
             // 1. Pridanie používateľovej správy do UI (vrátane obrázku pre preview)
             const previewText = userText || "Pozri si tento obrázok a pomôž mi s ním.";
-            addMessage(previewText, 'user', selectedImageBase64);
+            const userMessageElement = addMessage(previewText, 'user', selectedImageBase64);
             
             // 2. Reset UI a zobrazenie loading spinnera
             userInput.value = '';
@@ -598,6 +609,8 @@
                  parts.push({ text: "Prosím, pomôž mi s týmto obrázkom a vygeneruj relevantný Roblox Lua kód alebo vysvetlenie." });
             } else {
                  toggleLoading(false);
+                 // Odstránenie správy, ak bola odoslaná prázdna
+                 userMessageElement.remove();
                  return;
             }
 
@@ -615,8 +628,10 @@
             clearImage(); 
 
             // 6. Volanie API s retries
-            const maxRetries = 5;
+            // ZVÝŠENÉ: Max retries na 7
+            const maxRetries = 7; 
             let currentRetry = 0;
+            let apiSuccess = false;
 
             while (currentRetry < maxRetries) {
                 try {
@@ -627,18 +642,15 @@
                     });
 
                     if (!response.ok) {
-                        // Read response body before throwing to check for details
                         const errorBody = await response.json().catch(() => ({ message: 'Could not parse error body.' }));
                         
                         if (response.status === 429) {
                             throw new Error('Rate limit exceeded (429)');
                         } else if (response.status === 400) {
-                             // --- FIX for 400 Bad Request: Clear history and force restart ---
                             console.error("400 Error Response Body:", errorBody);
-                            chatHistory = []; // Force a clean slate for the next message
+                            chatHistory = []; // Reset kontextu pri 400
                             throw new Error(`Invalid request (400). Konverzácia bola vyresetovaná. Skúste to prosím znova s novou požiadavkou.`);
                         } else if (response.status >= 500 && response.status < 600) {
-                            // NEW: Handle 5xx errors (like 503) as temporary server issues and retry.
                             throw new Error(`Server error! status: ${response.status}`);
                         }
                         
@@ -654,10 +666,12 @@
                         addMessage(aiText, 'ai');
                         // Pridanie odpovede AI do histórie
                         chatHistory.push({ role: "model", parts: [{ text: aiText }] });
+                        apiSuccess = true;
                     } else {
-                        addMessage("Prepáč, nepodarilo sa mi vygenerovať odpoveď. Skús to prosím znova.", 'ai');
+                        console.warn("API returned no text content.");
+                        // Aj keď API odpovedalo OK, ak je text prázdny, považujeme to za neúspech pre účely UI a necháme prebehnúť cyklus.
                     }
-                    break; // Úspech, ukončenie cyklu
+                    break; // Úspech alebo úspešné spracovanie, ukončenie cyklu
                 } catch (error) {
                     console.error('Chyba pri volaní API:', error);
                     let errorMessage = error.message;
@@ -671,21 +685,26 @@
                     } 
                     // 2. Handling 400 (History clear)
                     else if (errorMessage.includes('Invalid request (400)')) {
-                        // Zobrazí špeciálnu správu, ak bola história vyresetovaná
+                        // Zobrazí špeciálnu správu, ak bola história vyresetovaná (kritická chyba)
                         addMessage("Prepáč, nastala chyba 400. **Kontext bol vyresetovaný.** Prosím, pošli svoju požiadavku opäť.", 'ai');
+                        apiSuccess = true; // Zobrazili sme správu, považujeme to za ukončené
                         break;
                     } 
-                    // 3. Handling final, non-retriable, or exhausted error
+                    // 3. Handling final, non-retriable, or exhausted error (Server/503)
                     else {
-                        // Kontrola, či ide o chybu servera (napr. 503) alebo chybu pri opakovaní
-                        if (errorMessage.includes('Server error!') || errorMessage.includes('HTTP error! status: 503')) {
-                            // Priateľská správa pre chybu servera (503)
-                            addMessage(`Prepáč, neviem sa pripojiť k expertovi. Skús to prosím o chvíľu neskôr.`, 'ai');
-                        } else {
-                            // Ostatné chyby, kde je vhodné zobraziť detail (napr. 401, 403)
-                            addMessage(`Prepáč, nastala chyba pri komunikácii s AI: ${errorMessage}.`, 'ai');
+                        // Ak zlyhá aj posledný pokus (alebo ide o neobnoviteľnú chybu, ktorá nespôsobila 400)
+                        if (!apiSuccess) {
+                            // Odstránenie poslednej používateľovej správy z histórie, aby nezasahovala do kontextu
+                            chatHistory.pop(); 
+                            userMessageElement.remove(); // Odstránenie správy z chatu, ako bolo požiadané.
+                            
+                            // Vizuálna spätná väzba (bliknutie červeného vstupu)
+                            inputControlsDiv.classList.add('error-flash');
+                            setTimeout(() => {
+                                inputControlsDiv.classList.remove('error-flash');
+                            }, 2000);
                         }
-                        break; // Chyba, ukončenie cyklu
+                        break; 
                     }
                 }
             }
